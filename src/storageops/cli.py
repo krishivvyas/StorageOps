@@ -1,12 +1,12 @@
 """Command-line entry point: ``storageops <command>``.
 
-Phase 1 provides ``scan``, Phase 2 ``analyze``, Phase 3 ``plan`` and Phase 4 ``bench``.
-Phase 5 adds ``gui``.
+Commands by phase: ``scan`` (1), ``analyze`` (2), ``plan`` (3), ``bench`` (4) and ``gui`` (5).
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import math
 import sys
 from collections.abc import Sequence
@@ -16,14 +16,15 @@ from pathlib import Path
 import pandas as pd
 
 from storageops import __version__
+from storageops.activity_log import setup_logging
 from storageops.config import Config, load_config
 from storageops.core import CleanupProblem, StorageAnalysis, analyze
 from storageops.formatting import format_bytes, parse_size
 from storageops.planners import (
-    BranchAndBoundPlanner,
-    GreedyPlanner,
+    PLANNER_NAMES,
     Planner,
     PlannerResult,
+    make_planner,
     plan_to_frame,
 )
 from storageops.sensors import (
@@ -54,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--no-duplicates", action="store_true", help="skip duplicate detection")
     scan.add_argument("--top", type=int, default=10, help="rows to show per table (default: 10)")
     scan.add_argument("-q", "--quiet", action="store_true", help="hide the progress indicator")
+    scan.add_argument(
+        "-y", "--yes", action="store_true",
+        help="confirm without the interactive prompt (you still state your OK explicitly)",
+    )  # fmt: skip
     scan.set_defaults(handler=_cmd_scan)
 
     ana = commands.add_parser(
@@ -90,7 +95,16 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--no-scaling", action="store_true", help="skip the scaling study")
     bench.add_argument("--no-sensitivity", action="store_true", help="skip the weight study")
     bench.add_argument("-c", "--config", type=Path, help="TOML config file")
+    bench.add_argument(
+        "-y", "--yes", action="store_true",
+        help="confirm without the interactive prompt (you still state your OK explicitly)",
+    )  # fmt: skip
     bench.set_defaults(handler=_cmd_bench)
+
+    gui = commands.add_parser("gui", help="open the desktop app (review, approve, execute)")
+    gui.add_argument("source", nargs="?", help="folder or dataset to load on start")
+    gui.add_argument("-c", "--config", type=Path, help="TOML config file")
+    gui.set_defaults(handler=_cmd_gui)
     return parser
 
 
@@ -106,12 +120,15 @@ def _add_problem_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("-c", "--config", type=Path, help="TOML config file")
     command.add_argument("--top", type=int, default=10, help="rows to show (default: 10)")
     command.add_argument("-q", "--quiet", action="store_true", help="hide the progress indicator")
+    command.add_argument(
+        "-y", "--yes", action="store_true",
+        help="confirm without the interactive prompt (you still state your OK explicitly)",
+    )  # fmt: skip
 
 
 _PLANNER_CHOICES = {
-    "greedy": lambda args: GreedyPlanner(),
-    "greedy-heuristic": lambda args: GreedyPlanner("heuristic"),
-    "bnb": lambda args: BranchAndBoundPlanner(time_limit_s=args.time_limit),
+    name: (lambda args, name=name: make_planner(name, time_limit_s=args.time_limit))
+    for name in PLANNER_NAMES
 }
 
 
@@ -128,6 +145,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="replace")
     args = build_parser().parse_args(argv)
+    if args.command != "gui":  # the GUI sets up its own logging
+        setup_logging()
+        shown = sys.argv[1:] if argv is None else list(argv)
+        logging.getLogger(__name__).info("command: storageops %s", " ".join(shown))
     return args.handler(args)
 
 
@@ -135,6 +156,11 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     config = _config_or_none(args.config)
     if config is None:
         return 2
+    steps = [_read_step(args.root)]
+    if args.output:
+        steps.append(f"write the dataset to {args.output} (plus a .meta.json next to it)")
+    if not _confirm(steps, args):
+        return 1
     snapshot = _scan(args.root, config, quiet=args.quiet, duplicates=not args.no_duplicates)
     if snapshot is None:
         return 2
@@ -147,6 +173,11 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
+    steps = [_read_step(args.source), "score risk, safety and action options (in memory)"]
+    if args.output:
+        steps.append(f"write the analysis table to {args.output}")
+    if not _confirm(steps, args):
+        return 1
     loaded = _load_problem(args)
     if loaded is None:
         return 2
@@ -160,6 +191,14 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
+    steps = [
+        _read_step(args.source),
+        "compute a cleanup plan (a proposal only: no file is changed)",
+    ]
+    if args.output:
+        steps.append(f"write the proposed plan to {args.output}")
+    if not _confirm(steps, args):
+        return 1
     loaded = _load_problem(args)
     if loaded is None:
         return 2
@@ -187,6 +226,15 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_gui(args: argparse.Namespace) -> int:
+    from storageops.gui.app import main as run_gui
+
+    if _config_or_none(args.config) is None:
+        return 2
+    run_gui(args.source, args.config)
+    return 0
+
+
 def _cmd_bench(args: argparse.Namespace) -> int:
     from dataclasses import replace
 
@@ -203,8 +251,50 @@ def _cmd_bench(args: argparse.Namespace) -> int:
         "run_sensitivity": False if args.no_sensitivity else None,
     }
     settings = replace(settings, **{k: v for k, v in overrides.items() if v is not None})
+    steps = [
+        "generate synthetic storage instances in memory (no real files are read or changed)",
+        f"write CSV results, figures and summary.md to {args.out}",
+    ]
+    if not _confirm(steps, args):
+        return 1
     run_experiment(args.out, settings, config=config, log=lambda m: print(m, flush=True))
     return 0
+
+
+def _read_step(source: Path) -> str:
+    if source.is_file():
+        return f"read the saved dataset {source} (read-only)"
+    return (
+        f"scan {source}: read file names, sizes and dates, and read file contents to find "
+        "duplicates (read-only: nothing is changed, moved or deleted)"
+    )
+
+
+def _confirm(steps: list[str], args: argparse.Namespace) -> bool:
+    """Nothing runs without the user's OK: an interactive y/N, or an explicit --yes."""
+    log = logging.getLogger(__name__)
+    print("StorageOps will:", file=sys.stderr)
+    for step in steps:
+        print(f"  - {step}", file=sys.stderr)
+    if args.yes:
+        log.info("user confirmed with --yes: %s", "; ".join(steps))
+        return True
+    if not sys.stdin.isatty():
+        print(
+            "error: no terminal to confirm in. Re-run with --yes to give your OK explicitly.",
+            file=sys.stderr,
+        )
+        log.warning("refused: no confirmation possible (no terminal, no --yes)")
+        return False
+    try:
+        answer = input("Continue? [y/N] ").strip().lower()
+    except EOFError:
+        answer = ""
+    confirmed = answer in ("y", "yes")
+    log.info("user answered %r: %s", answer, "confirmed" if confirmed else "cancelled")
+    if not confirmed:
+        print("Cancelled. Nothing was done.", file=sys.stderr)
+    return confirmed
 
 
 def _load_problem(

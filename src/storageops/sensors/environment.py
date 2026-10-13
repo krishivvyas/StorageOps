@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from storageops.sensors.hashing import DuplicateReport, find_duplicates
 from storageops.sensors.scanner import FileScanner, ProgressCallback, ScanStats
 
 SCHEMA_VERSION = 1
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -82,7 +84,10 @@ def capture_environment(
 ) -> EnvironmentSnapshot:
     """Scan ``root``, detect duplicates and read volume usage. Read-only."""
     config = config or Config()
+    log.info("scan started (read-only): %s", root)
     result = FileScanner(config.scanner, progress=progress, now=now).scan(root)
+    log.info("scan finished: %d files, %d unreadable paths, %.2fs", len(result.records),
+             len(result.issues), result.stats.duration_s)  # fmt: skip
 
     records = result.records
     issues = list(result.issues)

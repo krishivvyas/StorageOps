@@ -11,8 +11,24 @@ PLANNERS: dict[str, type[Planner]] = {
     "exhaustive": ExhaustivePlanner,
 }
 
+PLANNER_NAMES = ("bnb", "greedy", "greedy-heuristic")
+
+
+def make_planner(name: str, *, time_limit_s: float | None = 10.0) -> Planner:
+    """Build a planner by its user-facing name (CLI ``--planner`` / GUI choice)."""
+    if name == "bnb":
+        return BranchAndBoundPlanner(time_limit_s=time_limit_s)
+    if name == "greedy":
+        return GreedyPlanner("ratio")
+    if name == "greedy-heuristic":
+        return GreedyPlanner("heuristic")
+    raise ValueError(f"unknown planner {name!r}; choose from {', '.join(PLANNER_NAMES)}")
+
+
 __all__ = [
     "PLANNERS",
+    "PLANNER_NAMES",
+    "make_planner",
     "BranchAndBoundPlanner",
     "ExhaustivePlanner",
     "GreedyPlanner",

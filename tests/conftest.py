@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -12,6 +13,20 @@ NOW = 1_760_000_000.0  # fixed clock so file ages are deterministic
 
 REPORT_BYTES = b"%PDF" + b"A" * 5000
 PHOTO_BYTES = bytes(range(256)) * 40  # 10 240 bytes
+
+
+@pytest.fixture(autouse=True)
+def isolated_storageops_home(tmp_path_factory, monkeypatch):
+    """Every test gets its own StorageOps home, so no test can ever write logs or journals
+    into the real ``~/.storageops``."""
+    home = tmp_path_factory.mktemp("storageops_home")
+    monkeypatch.setenv("STORAGEOPS_HOME", str(home))
+    yield home
+    logger = logging.getLogger("storageops")
+    for handler in list(logger.handlers):
+        if getattr(handler, "_storageops", False):
+            logger.removeHandler(handler)
+            handler.close()
 
 
 def write_file(path: Path, data: bytes, age_days: float) -> Path:

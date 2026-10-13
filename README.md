@@ -21,7 +21,11 @@ pip install -e ".[dev,parquet]"
 
 ## Usage
 
-Scanning is strictly read-only.
+**Nothing happens without your OK.** Every command first lists exactly what it will do
+(read, compute, write a file) and asks `Continue? [y/N]`. Pass `--yes` to give that OK
+up front, e.g. in scripts. Without a terminal and without `--yes`, a command refuses to run.
+In the desktop app, every step (scan, plan, re-plan, dry run, execute) asks for OK in a
+dialog first. Scanning is strictly read-only.
 
 ```bash
 storageops scan "C:\Users\me\Downloads"                      # print an analysis report
@@ -106,7 +110,58 @@ Outputs in `results/`:
 - `figures/*.png`: quality, scaling time, scaling nodes and sensitivity charts;
 - `summary.md`: the tables behind every figure.
 
-The written analysis is in [docs/failure_analysis.md](docs/failure_analysis.md).
+The latest numbers and figures are in [docs/benchmark_results.md](docs/benchmark_results.md);
+the written analysis is in [docs/failure_analysis.md](docs/failure_analysis.md).
+Test results (557 passed, 1 skipped) are in [docs/test_results.md](docs/test_results.md).
+
+### Desktop app: review and approve (Phase 5)
+
+```bash
+storageops gui                            # choose a folder or dataset in the window
+storageops gui "C:\Users\me\Downloads"    # pre-fill the folder (still asks before scanning)
+```
+
+Each step below starts only after you press OK in a dialog that says exactly what it
+will do. Cancel at any point and nothing happens.
+
+1. **Load:** scan a folder (read-only) or open a saved dataset. The *Overview* tab shows
+   space by category; *Files & risk* shows every file's risk, protection reason and best
+   action.
+2. **Plan:** set the target ("free an extra 5GB", or "reach 100GB free"), optionally a MOVE
+   destination on another drive, and a planner.
+3. **Review:** in *Plan review* every proposed action starts **unapproved**. Approve rows
+   (click ☐ or press Space) or all at once. *Reject selected & re-plan* keeps the chosen
+   files and searches for an alternative plan.
+4. **Dry run:** required, for exactly the current selection. It checks every file and
+   changes nothing. Changing the selection afterwards requires a new dry run.
+5. **Execute:** asks for confirmation, then performs only the approved actions.
+
+### Safety: what touching a file involves
+
+| Layer | Guarantee |
+|---|---|
+| Your OK | Every step (scan, plan, re-plan, dry run, execute) needs explicit confirmation. The workflow core (`Session`) refuses any step without it, and logs both confirmations and refusals |
+| Approval | Only actions the user approved can run, and only after a dry run of that exact selection |
+| Preflight | A file is skipped if it is missing, changed since the scan, under a protected location, or has the system attribute |
+| DELETE | Goes to the Recycle Bin, never a permanent delete |
+| ARCHIVE / MOVE | The original is removed only after the archive or copy has been re-read and its content hash matches |
+| COMPRESS | NTFS compression in place; the content hash is checked to be unchanged |
+| Failures | One failed file never stops or affects the others; the original stays in place |
+
+### Logs: a record of everything that happened
+
+StorageOps keeps two records, both under `~/.storageops` (set the `STORAGEOPS_HOME`
+environment variable to use another folder):
+
+- `logs/storageops.log`: activity log of every command and GUI session. It records scans,
+  plans, approvals, rejections, dry runs and every file operation with its outcome.
+  Rotated at 2 MB, with 10 old files kept.
+- `journal/*.jsonl`: one file per dry run or execution, with one JSON line per file:
+  path, action, status, bytes freed, and where the data went (Recycle Bin, archive path or
+  move destination). Use it to audit a run or to restore files by hand.
+
+The GUI's *Results* tab shows both paths and has an *Open logs & journals* button. The test
+suite redirects `STORAGEOPS_HOME` to a temporary folder, so tests never write here.
 
 All options (excluded folders, hashing, risk weights, action costs, heuristic weights,
 protected paths, ...) are documented in [config/default.toml](config/default.toml).
@@ -169,8 +224,10 @@ src/storageops/
   core/          Phase 2 - risk, heuristic, state space
   planners/      Phase 3 - greedy & branch-and-bound
   benchmark/     Phase 4 - synthetic instances & evaluation
-  executor/      Phase 5 - approved file operations
-  gui/           Phase 5 - tkinter interface
+  executor/      Phase 5 - approved file operations + journal
+  gui/           Phase 5 - tkinter app (session.py = workflow, app.py = window)
+  paths.py       where logs and journals go (STORAGEOPS_HOME)
+  activity_log.py  always-on activity log
 tests/           mirrors src/
 config/          default configuration
 docs/            formulation & analysis write-ups

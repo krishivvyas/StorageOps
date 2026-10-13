@@ -179,3 +179,14 @@ def test_protected_copy_lets_every_candidate_copy_be_deleted():
     )
     assert problem.n == 2 and problem.group_sizes == (3,)
     assert not problem.evaluate([D, D]).violations  # the protected copy survives
+
+
+def test_keeping_forces_files_to_keep_without_touching_the_original():
+    kept = SMALL.keeping(["f2"])
+    assert kept.allowed_actions(2) == (K,)
+    assert kept.allowed_actions(0) == SMALL.allowed_actions(0)
+    assert SMALL.allowed_actions(2) == (K, D)  # original unchanged
+    best = min((s for s in complete_states(kept) if kept.is_goal(s)), key=lambda s: s.cost)
+    assert best.actions == (D, D, K)  # without f2, the target needs f0 and f1
+    # keeping f0 leaves only the duplicate pair, which may not be fully deleted
+    assert not any(SMALL.keeping(["f0"]).is_goal(s) for s in complete_states(SMALL.keeping(["f0"])))

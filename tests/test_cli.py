@@ -6,7 +6,7 @@ from storageops.cli import main
 
 def test_scan_prints_report_and_saves(sample_tree, tmp_path, capsys):
     out = tmp_path / "scan.csv"
-    assert main(["scan", str(sample_tree), "-o", str(out), "-q"]) == 0
+    assert main(["scan", "--yes", str(sample_tree), "-o", str(out), "-q"]) == 0
 
     stdout = capsys.readouterr().out
     assert "Scanned 8 files" in stdout
@@ -15,13 +15,13 @@ def test_scan_prints_report_and_saves(sample_tree, tmp_path, capsys):
 
 
 def test_scan_missing_root_returns_error(tmp_path, capsys):
-    assert main(["scan", str(tmp_path / "missing"), "-q"]) == 2
+    assert main(["scan", "--yes", str(tmp_path / "missing"), "-q"]) == 2
     assert "does not exist" in capsys.readouterr().err
 
 
 def test_analyze_folder(sample_tree, tmp_path, capsys):
     out = tmp_path / "analysis.csv"
-    assert main(["analyze", str(sample_tree), "--free", "1KB", "-o", str(out), "-q"]) == 0
+    assert main(["analyze", "--yes", str(sample_tree), "--free", "1KB", "-o", str(out), "-q"]) == 0
     stdout = capsys.readouterr().out
     assert "must free 1.0 KB" in stdout
     assert "Search problem:" in stdout and "feasible" in stdout
@@ -30,20 +30,20 @@ def test_analyze_folder(sample_tree, tmp_path, capsys):
 
 def test_analyze_saved_dataset_reports_infeasible_target(sample_tree, tmp_path, capsys):
     dataset = tmp_path / "scan.csv"
-    main(["scan", str(sample_tree), "-o", str(dataset), "-q"])
+    main(["scan", "--yes", str(sample_tree), "-o", str(dataset), "-q"])
     capsys.readouterr()
-    assert main(["analyze", str(dataset), "--free", "10TB"]) == 0
+    assert main(["analyze", "--yes", str(dataset), "--free", "10TB"]) == 0
     assert "INFEASIBLE" in capsys.readouterr().out
 
 
 def test_analyze_rejects_bad_size(sample_tree):
     with pytest.raises(SystemExit):
-        main(["analyze", str(sample_tree), "--free", "lots"])
+        main(["analyze", "--yes", str(sample_tree), "--free", "lots"])
 
 
 def test_plan_compare_and_save(sample_tree, tmp_path, capsys):
     out = tmp_path / "plan.csv"
-    args = ["plan", str(sample_tree), "--free", "4KB", "--compare", "-o", str(out), "-q"]
+    args = ["plan", "--yes", str(sample_tree), "--free", "4KB", "--compare", "-o", str(out), "-q"]
     assert main(args) == 0
     stdout = capsys.readouterr().out
     assert "Planner comparison:" in stdout
@@ -55,7 +55,10 @@ def test_plan_compare_and_save(sample_tree, tmp_path, capsys):
 
 
 def test_plan_reports_infeasible_target(sample_tree, capsys):
-    assert main(["plan", str(sample_tree), "--free", "10TB", "--planner", "greedy", "-q"]) == 0
+    assert (
+        main(["plan", "--yes", str(sample_tree), "--free", "10TB", "--planner", "greedy", "-q"])
+        == 0
+    )
     assert "no plan found" in capsys.readouterr().out
-    assert main(["plan", str(sample_tree), "--free", "10TB", "-q"]) == 0
+    assert main(["plan", "--yes", str(sample_tree), "--free", "10TB", "-q"]) == 0
     assert "cannot be reached" in capsys.readouterr().out

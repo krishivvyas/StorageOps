@@ -30,8 +30,8 @@ The state space has prod |A(f_i)| complete assignments, up to 5 ** n.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Collection, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -169,6 +169,15 @@ class CleanupProblem:
             risk_budget=self.risk_budget,
             excluded_files=self.excluded_files,
         )
+
+    def keeping(self, paths: Collection[str]) -> CleanupProblem:
+        """The same problem with the given files forced to KEEP (e.g. rejected by the user)."""
+        fixed = np.isin(np.asarray(self.paths, dtype=object), list(paths))
+        cost = self.cost.copy()
+        heuristic = self.heuristic.copy()
+        cost[fixed, KEEP + 1 :] = math.inf
+        heuristic[fixed, KEEP + 1 :] = -math.inf
+        return replace(self, cost=cost, heuristic=heuristic)
 
     # ------------------------------------------------------------------ properties
 
