@@ -566,13 +566,3 @@ Logs and journals are written to `~/.storageops` (or to `STORAGEOPS_HOME`).
 | In-place compression efficiency | 0.6 |
 | Heuristic weights (benefit / inactivity / duplicate / risk) | 0.35 / 0.15 / 0.15 / 0.35 |
 | Branch-and-bound time limit (GUI/CLI default) | 10 s |
-
-## Appendix C: Team contributions
-
-*To be completed by the team.*
-
-| Member | Contributions |
-|---|---|
-| Het Patel | |
-| Krishiv Vyas | |
-| Parth Patel | |
