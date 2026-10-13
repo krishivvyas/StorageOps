@@ -1,0 +1,55 @@
+# StorageOps configuration.
+#
+# Every value below is the built-in default, so this file is optional.
+# Copy it, edit what you need and pass it with `storageops scan --config <file>`.
+# Unknown sections or keys are rejected to catch typos early.
+
+[scanner]
+# Hidden files are still scanned by default: they can be valid cleanup
+# candidates. The risk model (Phase 2) decides how cautious to be with them.
+include_hidden = true
+
+# Symlinks and NTFS junctions are not followed by default (avoids cycles and
+# double-counting the same bytes).
+follow_symlinks = false
+
+# Maximum directory depth below the scan root (0 = root folder only).
+# Omit the key for unlimited depth.
+# max_depth = 10
+
+# Files smaller than this are ignored entirely.
+min_file_size_bytes = 0
+
+# Directory names (case-insensitive) that are never entered.
+# Note: setting this key replaces the whole default list.
+excluded_dir_names = [
+    "$recycle.bin",
+    "system volume information",
+    "$windows.~bt",
+    "$windows.~ws",
+    "winsxs",
+    ".git",
+    ".svn",
+    ".hg",
+]
+
+# File extensions that are ignored entirely, e.g. [".lnk"].
+excluded_extensions = []
+
+# Report scan progress every N files.
+progress_interval = 500
+
+[hashing]
+# Any algorithm in hashlib.algorithms_available. blake2b is fast and collision-safe.
+algorithm = "blake2b"
+
+# Read buffer size for full-content hashing.
+chunk_size_bytes = 1048576
+
+# Bytes read from the head and from the tail of a file for the cheap
+# "partial hash" stage. Files up to 2x this size are hashed in full immediately.
+partial_bytes = 65536
+
+# Files smaller than this are not checked for duplicates (must be >= 1:
+# empty files are trivially identical and free no space).
+min_size_bytes = 1

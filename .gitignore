@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated data - scans may contain private file paths
+data/
+results/
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

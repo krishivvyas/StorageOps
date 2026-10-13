@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "storageops"
+version = "0.1.0"
+description = "AI-based intelligent storage space optimization and safe cleanup planner"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Het Patel" },
+    { name = "Krishiv Vyas" },
+    { name = "Parth Patel" },
+]
+dependencies = [
+    "pandas>=2.1",
+]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=14"]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.scripts]
+storageops = "storageops.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
