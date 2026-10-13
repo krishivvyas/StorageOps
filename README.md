@@ -9,16 +9,6 @@ actions (KEEP / DELETE / ARCHIVE / COMPRESS / MOVE) with their benefit and risk,
 for a cleanup plan that reaches a user-defined free-space target safely. **No file is ever
 modified without explicit user approval.** See [docs/problem_formulation.md](docs/problem_formulation.md).
 
-## Status
-
-| Phase | Scope | State |
-|---|---|---|
-| 1 | Sensors & environment: scanner, metadata, duplicate detection, datasets | done |
-| 2 | Heuristics & state-space representation | planned |
-| 3 | Greedy baseline + branch-and-bound planner | planned |
-| 4 | Benchmark generator & evaluation | planned |
-| 5 | Tkinter GUI & approved-action executor | planned |
-
 ## Setup
 
 Requires Python 3.11+.
