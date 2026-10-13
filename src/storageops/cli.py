@@ -1,7 +1,7 @@
 """Command-line entry point: ``storageops <command>``.
 
-Phase 1 provides ``scan``, Phase 2 ``analyze`` and Phase 3 ``plan``. Later phases add
-``bench`` and ``gui``.
+Phase 1 provides ``scan``, Phase 2 ``analyze``, Phase 3 ``plan`` and Phase 4 ``bench``.
+Phase 5 adds ``gui``.
 """
 
 from __future__ import annotations
@@ -77,6 +77,20 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--compare", action="store_true", help="also run and compare all planners")
     plan.add_argument("-o", "--output", type=Path, help="save the proposed plan (.csv)")
     plan.set_defaults(handler=_cmd_plan)
+
+    bench = commands.add_parser(
+        "bench", help="run the planner benchmark on synthetic instances (no real files)"
+    )
+    bench.add_argument(
+        "-o", "--out", type=Path, default=Path("results"), help="output folder (default: results)"
+    )
+    bench.add_argument("--quick", action="store_true", help="small smoke-test run (< 1 minute)")
+    bench.add_argument("--seeds", type=int, help="random instances per configuration")
+    bench.add_argument("--time-limit", type=float, help="branch-and-bound limit per instance (s)")
+    bench.add_argument("--no-scaling", action="store_true", help="skip the scaling study")
+    bench.add_argument("--no-sensitivity", action="store_true", help="skip the weight study")
+    bench.add_argument("-c", "--config", type=Path, help="TOML config file")
+    bench.set_defaults(handler=_cmd_bench)
     return parser
 
 
@@ -170,6 +184,26 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         plan_to_frame(result.plan).to_csv(args.output, index=False)
         print(f"\nSaved plan: {args.output}")
     print("\nNothing has been changed. Every action needs your approval before it runs.")
+    return 0
+
+
+def _cmd_bench(args: argparse.Namespace) -> int:
+    from dataclasses import replace
+
+    from storageops.benchmark import ExperimentSettings, run_experiment
+
+    config = _config_or_none(args.config)
+    if config is None:
+        return 2
+    settings = ExperimentSettings.quick() if args.quick else ExperimentSettings()
+    overrides = {
+        "seeds": args.seeds,
+        "time_limit_s": args.time_limit,
+        "run_scaling": False if args.no_scaling else None,
+        "run_sensitivity": False if args.no_sensitivity else None,
+    }
+    settings = replace(settings, **{k: v for k, v in overrides.items() if v is not None})
+    run_experiment(args.out, settings, config=config, log=lambda m: print(m, flush=True))
     return 0
 
 

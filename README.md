@@ -87,6 +87,27 @@ print(result.status, result.plan.freed_bytes, result.plan.total_cost, result.gap
 print(result.stats)  # nodes generated / expanded / pruned, time
 ```
 
+### Benchmarking (Phase 4)
+
+`bench` compares the planners on synthetic storage environments. These are generated file
+tables with realistic sizes, ages, folders and duplicates, so no real files are involved.
+It writes CSVs, figures and a Markdown summary.
+
+```bash
+storageops bench --quick                 # smoke test, a few seconds
+storageops bench -o results              # full experiment (several minutes)
+python scripts/run_benchmarks.py --seeds 5 --time-limit 10
+```
+
+Outputs in `results/`:
+- `results.csv`: every (instance, planner) run;
+- `scaling.csv`: runs at growing file counts;
+- `sensitivity.csv`: the heuristic-weight sweep;
+- `figures/*.png`: quality, scaling time, scaling nodes and sensitivity charts;
+- `summary.md`: the tables behind every figure.
+
+The written analysis is in [docs/failure_analysis.md](docs/failure_analysis.md).
+
 All options (excluded folders, hashing, risk weights, action costs, heuristic weights,
 protected paths, ...) are documented in [config/default.toml](config/default.toml).
 

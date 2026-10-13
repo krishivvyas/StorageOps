@@ -136,10 +136,10 @@ Depth-first search over the state space with backtracking on mutable arrays (O(n
 | Ingredient | Choice |
 |---|---|
 | Initial incumbent U | Best of the two greedy plans |
-| Lower bound | g + LP(remaining files, remaining bytes): the LP relaxation of the multiple-choice knapsack (`relaxation.py`), i.e. hull edges of the remaining files filled in slope order, the last one fractionally. Admissible because the relaxation drops integrality, the duplicate constraint and the budget. |
+| Lower bound | g + LP(remaining units, remaining bytes): the LP relaxation of the multiple-choice knapsack (`relaxation.py`), i.e. hull edges of the remaining units filled in slope order, the last one fractionally. A *unit* is a file, or a whole duplicate group whose copies are all candidates. A group's hull is the exact convexification of "every copy but one may be deleted": the lower hull of the union, over the kept copy m, of the Minkowski sums of the members' hulls (m without DELETE). Admissible because it only drops integrality and the risk budget. |
 | Pruning | Child pruned if g >= U, g > C_max, g + LP >= U, or it deletes a group's last copy |
 | Goal cut-off | A node with B >= R is recorded and not expanded (keeping everything else is its cheapest completion) |
-| File order | `ratio` (cheapest bytes first, default), `benefit`, or `problem` |
+| File order | `ratio` (cheapest bytes first, default), `benefit`, or `problem`; members of a duplicate group are always kept next to each other so their unit can be bounded |
 | Action order | `bound` (lowest g + LP first, default) or `heuristic` (highest h first) |
 | Limits | Time / node limit, returning the best plan so far with gap = (cost - root LP) / cost |
 

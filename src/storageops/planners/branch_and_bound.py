@@ -30,12 +30,13 @@ import time
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 
 from storageops.core.actions import ACTION_INDEX
 from storageops.core.state import DELETE, KEEP, CleanupProblem
 from storageops.planners.base import Outcome, Planner, SearchStats
 from storageops.planners.greedy import GreedyPlanner
-from storageops.planners.relaxation import Relaxation
+from storageops.planners.relaxation import Relaxation, file_hulls, first_slopes, full_groups
 
 FileOrder = Literal["ratio", "benefit", "problem"]
 ActionOrder = Literal["bound", "heuristic"]
@@ -70,7 +71,12 @@ class BranchAndBoundPlanner(Planner):
         if required == 0:
             return Outcome(np.full(n, KEEP, dtype=np.int64), proven_optimal=True, lower_bound=0.0)
 
-        relaxation = Relaxation(problem.benefit, problem.cost)
+        perm = self._file_order(problem)
+        benefit = problem.benefit[perm]
+        cost = problem.cost[perm]
+        group_of = problem.group_index[perm]
+        group_sizes = problem.group_sizes
+        relaxation = Relaxation(benefit, cost, group_of, group_sizes)
         root_bound = relaxation.bound(0, required)
         if math.isinf(root_bound) or root_bound > problem.risk_budget:
             return Outcome(
@@ -79,13 +85,6 @@ class BranchAndBoundPlanner(Planner):
                 lower_bound=math.inf,
                 proven_infeasible=True,
             )
-
-        perm = self._file_order(problem, relaxation)
-        benefit = problem.benefit[perm]
-        cost = problem.cost[perm]
-        group_of = problem.group_index[perm]
-        group_sizes = problem.group_sizes
-        relaxation = Relaxation(benefit, cost)  # rebuilt so its file indices match perm
         heuristic = problem.heuristic[perm]
         allowed = [np.flatnonzero(np.isfinite(cost[i])).tolist() for i in range(n)]
         by_heuristic = [
@@ -183,15 +182,29 @@ class BranchAndBoundPlanner(Planner):
             proven_infeasible=exhausted and math.isinf(best_cost),
         )
 
-    def _file_order(self, problem: CleanupProblem, relaxation: Relaxation) -> np.ndarray:
-        if self.order == "problem":
-            return np.arange(problem.n)
+    def _file_order(self, problem: CleanupProblem) -> np.ndarray:
+        """Decision order. Members of a binding duplicate group are kept next to each
+        other so that the relaxation can bound the group as one unit."""
         max_benefit = np.where(problem.allowed, problem.benefit, 0).max(axis=1)
-        if self.order == "benefit":
-            return np.argsort(-max_benefit, kind="stable")
-        return np.lexsort((-max_benefit, relaxation.first_slope))  # cheapest bytes first
+        slope = first_slopes(file_hulls(problem.benefit, problem.cost))
+        unit = np.arange(problem.n)
+        for members in full_groups(problem.group_index, problem.group_sizes).values():
+            unit[members] = members.min()
+        if self.order == "problem":
+            key = (unit.astype(float),)
+        elif self.order == "benefit":
+            key = (-_per_unit(max_benefit, unit, "max"),)
+        else:  # cheapest bytes first, then larger files
+            key = (-_per_unit(max_benefit, unit, "max"), _per_unit(slope, unit, "min"))
+        # last key is the primary sort key; unit and position keep groups together and stable
+        return np.lexsort((np.arange(problem.n), unit, *key))
 
     def _out_of_budget(self, deadline: float | None, stats: SearchStats) -> bool:
         if deadline is not None and time.perf_counter() > deadline:
             return True
         return self.node_limit is not None and stats.nodes_generated >= self.node_limit
+
+
+def _per_unit(values: np.ndarray, unit: np.ndarray, how: str) -> np.ndarray:
+    """Replace each file's value by the ``how`` ("min"/"max") over its unit (group)."""
+    return pd.Series(values, dtype=float).groupby(unit).transform(how).to_numpy()

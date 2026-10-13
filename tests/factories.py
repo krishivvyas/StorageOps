@@ -79,7 +79,8 @@ def make_problem(benefit, cost, groups=None, group_sizes=(), *, free=0, target=0
 
 
 def random_problem(rng: np.random.Generator, n: int, *, budget: float | None = None,
-                   target_fraction: float = 0.4) -> CleanupProblem:  # fmt: skip
+                   target_fraction: float = 0.4, group_size: int = 2,
+                   shuffle: bool = False) -> CleanupProblem:  # fmt: skip
     """Random instance shaped like real ones: DELETE frees everything, ARCHIVE/COMPRESS a
     fraction, MOVE sometimes; some actions disallowed; a few duplicate pairs."""
     size = rng.integers(1, 1000, n)
@@ -96,9 +97,14 @@ def random_problem(rng: np.random.Generator, n: int, *, budget: float | None = N
     disallow[:, 0] = False
     cost[disallow] = math.inf
     groups = np.full(n, -1)
-    pairs = n // 4
-    for g in range(pairs):
-        groups[2 * g : 2 * g + 2] = g
+    count = n // (2 * group_size)
+    for g in range(count):
+        members = slice(group_size * g, group_size * (g + 1))
+        groups[members] = g
+        size[members] = size[group_size * g]  # copies have identical size
+        benefit[members, 1] = benefit[members, 4] = size[group_size * g]
+    order = rng.permutation(n) if shuffle else np.arange(n)
     target = int(size.sum() * target_fraction)
-    return make_problem(benefit, cost, groups, [2] * pairs, target=target, budget=budget,
+    return make_problem(benefit[order], cost[order], groups[order], [group_size] * count,
+                        target=target, budget=budget,
                         heuristic=rng.random((n, 5)))  # fmt: skip
