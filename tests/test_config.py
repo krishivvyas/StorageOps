@@ -43,3 +43,44 @@ def test_invalid_config_is_rejected(tmp_path, text):
     path.write_text(text)
     with pytest.raises(ValueError):
         load_config(path)
+
+
+def test_phase2_tables_merge_partial_overrides(tmp_path):
+    path = tmp_path / "c.toml"
+    path.write_text(
+        "[risk.category_base]\nvideo = 0.1\n[actions.severity]\nDELETE = 0.9\n"
+        "[safety]\n" + r"protected_paths = ['D:\Vault']" + "\n"  # TOML literal string
+    )
+    cfg = load_config(path)
+    assert cfg.risk.category_base["video"] == 0.1
+    assert cfg.risk.category_base["document"] == 0.8
+    assert cfg.actions.severity == {"DELETE": 0.9, "ARCHIVE": 0.4, "MOVE": 0.25, "COMPRESS": 0.1}
+    assert cfg.safety.protected_paths == (r"D:\Vault",)
+
+
+def test_category_tables_cover_every_category():
+    from storageops.models import FileCategory
+
+    cfg = Config()
+    categories = {c.value for c in FileCategory}
+    assert set(cfg.risk.category_base) == categories
+    assert set(cfg.actions.compression_ratio) == categories
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[risk.category_base]\nsecret = 0.5\n",  # unknown category
+        "[risk.category_base]\nvideo = 1.5\n",  # out of range
+        "[risk]\nweight_category = 0.9\n",  # weights no longer sum to 1
+        "[actions.severity]\nKEEP = 0.5\n",  # KEEP has no severity
+        "[actions]\nmin_benefit_bytes = 0\n",
+        "[heuristic]\nweight_risk = -1\n",
+        "[safety]\nmax_action_risk = 2\n",
+    ],
+)
+def test_invalid_phase2_config_is_rejected(tmp_path, text):
+    path = tmp_path / "bad.toml"
+    path.write_text(text)
+    with pytest.raises(ValueError):
+        load_config(path)

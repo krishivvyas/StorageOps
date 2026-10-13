@@ -43,8 +43,32 @@ print(snapshot.disk.free_bytes, len(snapshot.files))
 print(category_summary(snapshot.files))
 ```
 
-All options (excluded folders, hashing parameters, ...) are documented in
-[config/default.toml](config/default.toml).
+### Analysis (Phase 2)
+
+`analyze` scores every file's risk, applies the safety rules, works out the benefit and
+cost of each action, and formulates the search problem for a free-space target. It is
+read-only and accepts either a folder or a dataset saved by `scan -o`.
+
+```bash
+storageops analyze "C:\Users\me\Downloads" --free 5GB             # free 5 GB more
+storageops analyze data/downloads.csv --target-free 100GB         # reach 100 GB free
+storageops analyze data/downloads.csv --free 5GB --move-to E:\Archive -o data/analysis.csv
+```
+
+```python
+from storageops.core import CleanupProblem, analyze
+
+analysis = analyze(snapshot.files, move_destination="E:/Archive")
+problem = CleanupProblem.from_analysis(
+    analysis, free_bytes=snapshot.disk.free_bytes, target_free_bytes=100 * 1024**3
+)
+state = problem.initial_state()
+for action, child in problem.successors(state):  # the search interface used by the planners
+    ...
+```
+
+All options (excluded folders, hashing, risk weights, action costs, heuristic weights,
+protected paths, ...) are documented in [config/default.toml](config/default.toml).
 
 ## How the sensors work
 
@@ -58,6 +82,22 @@ All options (excluded folders, hashing parameters, ...) are documented in
   partial hash, then full BLAKE2b hash) so only true candidates are read in full. Hard links
   are not counted as reclaimable.
 - **Dataset** (`sensors/dataset.py`): typed pandas DataFrame plus category and duplicate summaries.
+
+## How the analysis works
+
+- **Risk** (`core/risk.py`): a value between 0 and 1. It combines the category's base risk,
+  how recently the file was modified and opened, the folder it lives in (Documents vs.
+  Downloads), its hidden/read-only flags, and a discount for duplicates.
+- **Safety** (`core/safety.py`): protected locations, system files and sensitive name
+  patterns such as keys and password vaults may only be KEPT.
+- **Actions** (`core/actions.py`): benefit and cost of every (file, action) pair, with
+  cost = severity x risk + penalty. Disallowed pairs cost infinity.
+- **Heuristic** (`core/heuristic.py`): a weighted score that guides the search order; it
+  never changes which plan is optimal.
+- **State space** (`core/state.py`): `CleanupProblem` / `PlanState` with initial state,
+  successors, goal test, path cost and the duplicate-group constraint.
+
+Full formulas: [docs/problem_formulation.md](docs/problem_formulation.md).
 
 ## Development
 

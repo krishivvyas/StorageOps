@@ -53,3 +53,106 @@ partial_bytes = 65536
 # Files smaller than this are not checked for duplicates (must be >= 1:
 # empty files are trivially identical and free no space).
 min_size_bytes = 1
+
+# =========================================================== Phase 2: risk model
+# R(f) in [0, 1]: estimated value lost if the file were removed.
+# See src/storageops/core/risk.py for the full formula.
+[risk]
+# weight_category + weight_recency + weight_usage must equal 1.
+weight_category = 0.6
+weight_recency = 0.25            # recently modified -> riskier
+weight_usage = 0.15              # recently accessed -> riskier (weak signal on Windows)
+recency_half_life_days = 90.0
+usage_half_life_days = 90.0
+hidden_penalty = 0.05
+readonly_penalty = 0.1
+# Parent folder names (case-insensitive) that raise or lower risk.
+important_dirs = ["documents", "desktop", "pictures", "music", "videos", "onedrive"]
+important_dir_boost = 0.2
+low_value_dirs = ["downloads", "temp", "tmp", "cache", "logs"]
+low_value_dir_relief = 0.15
+# Multiplier for files with an identical copy elsewhere (safe because the planner
+# may never delete every copy of a duplicate group).
+duplicate_factor = 0.25
+
+# Base risk per file category. Partial tables are fine: missing keys keep their default.
+[risk.category_base]
+temporary = 0.05
+cache = 0.05
+log = 0.15
+installer = 0.2
+compressed = 0.4
+video = 0.5
+audio = 0.5
+other = 0.5
+image = 0.6
+executable = 0.6
+data = 0.7
+document = 0.8
+source_code = 0.8
+system = 1.0
+
+# ========================================================= Phase 2: action model
+# cost(f, a) = severity(a) * R(f) + penalty(a);   cost(f, KEEP) = 0
+[actions]
+# COMPRESS (transparent, in-place) saves this fraction of what ARCHIVE would save.
+inplace_compression_efficiency = 0.6
+# ARCHIVE / COMPRESS are only offered if they save at least this fraction of the file.
+min_compression_saving = 0.1
+# Actions freeing fewer bytes than this are not offered.
+min_benefit_bytes = 1
+
+# How drastic each action is (scales the file's risk).
+[actions.severity]
+DELETE = 1.0
+ARCHIVE = 0.4
+MOVE = 0.25
+COMPRESS = 0.1
+
+# Flat cost per touched file: discourages unnecessary actions.
+[actions.penalty]
+DELETE = 0.02
+ARCHIVE = 0.04
+MOVE = 0.03
+COMPRESS = 0.03
+
+# Expected compressed size / original size, per category.
+[actions.compression_ratio]
+temporary = 0.5
+cache = 0.6
+log = 0.15
+installer = 0.95
+compressed = 1.0
+video = 0.98
+audio = 0.97
+other = 0.7
+image = 0.95
+executable = 0.6
+data = 0.4
+document = 0.6
+source_code = 0.25
+system = 0.6
+
+# ============================================================ Phase 2: heuristic
+# h(f, a) = w_b * benefit + w_i * inactivity + w_d * duplicate - w_r * severity(a) * risk
+# Guides search order only; the cost function above defines optimality.
+[heuristic]
+weight_benefit = 0.35
+weight_inactivity = 0.15
+weight_duplicate = 0.15
+weight_risk = 0.35
+inactivity_half_life_days = 180.0
+
+# =============================================================== Phase 2: safety
+[safety]
+# Files under these folders are never touched. %VARIABLES% are expanded; entries
+# whose variables are undefined on this machine are ignored.
+protected_paths = ["%SystemRoot%", "%ProgramFiles%", "%ProgramFiles(x86)%", "%ProgramData%"]
+protected_categories = ["system"]
+protect_system_files = true      # Windows "system" attribute
+protected_name_patterns = [
+    "*.pem", "*.key", "*.pfx", "*.p12", "*.kdbx", "id_rsa*", "id_ed25519*", "wallet.dat",
+    "desktop.ini", "ntuser.*", "pagefile.sys", "hiberfil.sys", "swapfile.sys",
+]
+# An action is forbidden when severity(a) * R(f) exceeds this value.
+max_action_risk = 0.6

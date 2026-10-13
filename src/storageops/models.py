@@ -93,3 +93,33 @@ class ScanIssue:
 
     path: str
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedAction:
+    """One proposed, not yet approved, operation on one file."""
+
+    path: str
+    action: Action
+    size_bytes: int
+    benefit_bytes: int  # bytes freed on the source volume
+    cost: float  # contribution to the plan's path cost
+    risk: float  # file risk estimate in [0, 1]
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupPlan:
+    """A complete proposal produced by a planner. Files not listed are KEPT."""
+
+    actions: tuple[PlannedAction, ...]
+    required_bytes: int
+    freed_bytes: int
+    total_cost: float
+    meets_target: bool
+    is_goal: bool  # meets the target and satisfies every constraint and the risk budget
+
+    def count(self, action: Action) -> int:
+        return sum(1 for a in self.actions if a.action is action)
+
+    def freed_by(self, action: Action) -> int:
+        return sum(a.benefit_bytes for a in self.actions if a.action is action)
