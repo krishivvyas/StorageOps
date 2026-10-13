@@ -10,29 +10,10 @@ from storageops.core.analysis import analyze
 from storageops.core.state import CleanupProblem, PlanState
 from storageops.models import Action
 from storageops.models import FileCategory as C
-from tests.factories import make_frame, make_record
+from tests.factories import make_frame, make_problem, make_record
 
 INF = math.inf
 K, D, A, Z, M = Action.KEEP, Action.DELETE, Action.ARCHIVE, Action.COMPRESS, Action.MOVE
-
-
-def make_problem(benefit, cost, groups=None, group_sizes=(), *, free=0, target=0, budget=INF):
-    benefit = np.array(benefit, dtype=np.int64)
-    cost = np.array(cost, dtype=float)
-    n = len(benefit)
-    return CleanupProblem(
-        paths=tuple(f"f{i}" for i in range(n)),
-        sizes=benefit.max(axis=1),
-        risk=np.zeros(n),
-        benefit=benefit,
-        cost=cost,
-        heuristic=np.where(np.isfinite(cost), 0.0, -INF),
-        group_index=np.array(groups if groups is not None else [-1] * n, dtype=np.int64),
-        group_sizes=tuple(group_sizes),
-        free_bytes=free,
-        target_free_bytes=target,
-        risk_budget=budget,
-    )
 
 
 # Columns: KEEP, DELETE, ARCHIVE, COMPRESS, MOVE

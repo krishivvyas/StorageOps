@@ -67,6 +67,26 @@ for action, child in problem.successors(state):  # the search interface used by 
     ...
 ```
 
+### Planning (Phase 3)
+
+`plan` searches for the cheapest set of actions that reaches the target. It only proposes:
+nothing is changed on disk.
+
+```bash
+storageops plan data/downloads.csv --free 5GB                        # branch-and-bound (default)
+storageops plan data/downloads.csv --free 5GB --compare              # greedy vs. branch-and-bound
+storageops plan data/downloads.csv --free 5GB --planner greedy -o data/plan.csv
+storageops plan data/downloads.csv --free 50GB --time-limit 60 --risk-budget 20
+```
+
+```python
+from storageops.planners import BranchAndBoundPlanner, GreedyPlanner
+
+result = BranchAndBoundPlanner(time_limit_s=10).plan(problem)
+print(result.status, result.plan.freed_bytes, result.plan.total_cost, result.gap)
+print(result.stats)  # nodes generated / expanded / pruned, time
+```
+
 All options (excluded folders, hashing, risk weights, action costs, heuristic weights,
 protected paths, ...) are documented in [config/default.toml](config/default.toml).
 
@@ -96,6 +116,18 @@ protected paths, ...) are documented in [config/default.toml](config/default.tom
   never changes which plan is optimal.
 - **State space** (`core/state.py`): `CleanupProblem` / `PlanState` with initial state,
   successors, goal test, path cost and the duplicate-group constraint.
+
+
+## How the planners work
+
+- **Greedy** (`planners/greedy.py`): the multiple-choice knapsack greedy. It takes the
+  cheapest bytes first, walking each file's convex hull of actions (KEEP -> COMPRESS ->
+  DELETE). Fast, with no guarantee.
+- **Branch-and-bound** (`planners/branch_and_bound.py`): depth-first search starting from
+  the greedy plan, pruned with an LP-relaxation lower bound. It proves optimality when it
+  finishes; otherwise it reports the gap.
+- **Exhaustive** (`planners/exhaustive.py`): brute force for tiny instances, the ground truth
+  for tests and benchmarks.
 
 Full formulas: [docs/problem_formulation.md](docs/problem_formulation.md).
 

@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 
 from storageops.cli import main
@@ -38,3 +39,23 @@ def test_analyze_saved_dataset_reports_infeasible_target(sample_tree, tmp_path, 
 def test_analyze_rejects_bad_size(sample_tree):
     with pytest.raises(SystemExit):
         main(["analyze", str(sample_tree), "--free", "lots"])
+
+
+def test_plan_compare_and_save(sample_tree, tmp_path, capsys):
+    out = tmp_path / "plan.csv"
+    args = ["plan", str(sample_tree), "--free", "4KB", "--compare", "-o", str(out), "-q"]
+    assert main(args) == 0
+    stdout = capsys.readouterr().out
+    assert "Planner comparison:" in stdout
+    assert "Plan from branch_and_bound: optimal" in stdout
+    assert "Nothing has been changed" in stdout
+    plan = pd.read_csv(out)
+    assert list(plan.columns) == ["path", "action", "size_bytes", "benefit_bytes", "cost", "risk"]
+    assert plan["benefit_bytes"].sum() >= 4096
+
+
+def test_plan_reports_infeasible_target(sample_tree, capsys):
+    assert main(["plan", str(sample_tree), "--free", "10TB", "--planner", "greedy", "-q"]) == 0
+    assert "no plan found" in capsys.readouterr().out
+    assert main(["plan", str(sample_tree), "--free", "10TB", "-q"]) == 0
+    assert "cannot be reached" in capsys.readouterr().out

@@ -1,7 +1,7 @@
 """Command-line entry point: ``storageops <command>``.
 
-Phase 1 provides ``scan``, Phase 2 ``analyze``. Later phases add ``plan``, ``bench``
-and ``gui``.
+Phase 1 provides ``scan``, Phase 2 ``analyze`` and Phase 3 ``plan``. Later phases add
+``bench`` and ``gui``.
 """
 
 from __future__ import annotations
@@ -19,6 +19,13 @@ from storageops import __version__
 from storageops.config import Config, load_config
 from storageops.core import CleanupProblem, StorageAnalysis, analyze
 from storageops.formatting import format_bytes, parse_size
+from storageops.planners import (
+    BranchAndBoundPlanner,
+    GreedyPlanner,
+    Planner,
+    PlannerResult,
+    plan_to_frame,
+)
 from storageops.sensors import (
     EnvironmentSnapshot,
     capture_environment,
@@ -52,18 +59,46 @@ def build_parser() -> argparse.ArgumentParser:
     ana = commands.add_parser(
         "analyze", help="score risk, safety and action options and formulate the search problem"
     )
-    ana.add_argument("source", type=Path, help="folder to scan, or a dataset saved by `scan -o`")
-    target = ana.add_mutually_exclusive_group(required=True)
+    _add_problem_arguments(ana)
+    ana.add_argument("-o", "--output", type=Path, help="save the per-file analysis table (.csv)")
+    ana.set_defaults(handler=_cmd_analyze)
+
+    plan = commands.add_parser("plan", help="search for a cleanup plan (proposes only)")
+    _add_problem_arguments(plan)
+    plan.add_argument(
+        "--planner",
+        choices=sorted(_PLANNER_CHOICES),
+        default="bnb",
+        help="planner to use (default: bnb = branch-and-bound)",
+    )
+    plan.add_argument(
+        "--time-limit", type=float, default=10.0, help="branch-and-bound time limit in seconds"
+    )
+    plan.add_argument("--compare", action="store_true", help="also run and compare all planners")
+    plan.add_argument("-o", "--output", type=Path, help="save the proposed plan (.csv)")
+    plan.set_defaults(handler=_cmd_plan)
+    return parser
+
+
+def _add_problem_arguments(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "source", type=Path, help="folder to scan, or a dataset saved by `scan -o`"
+    )
+    target = command.add_mutually_exclusive_group(required=True)
     target.add_argument("--free", type=_size, help="extra space to free, e.g. 20GB")
     target.add_argument("--target-free", type=_size, help="desired total free space, e.g. 100GB")
-    ana.add_argument("--move-to", help="destination folder on another drive (enables MOVE)")
-    ana.add_argument("--risk-budget", type=float, default=math.inf, help="max total plan cost")
-    ana.add_argument("-o", "--output", type=Path, help="save the per-file analysis table (.csv)")
-    ana.add_argument("-c", "--config", type=Path, help="TOML config file")
-    ana.add_argument("--top", type=int, default=10, help="candidates to show (default: 10)")
-    ana.add_argument("-q", "--quiet", action="store_true", help="hide the progress indicator")
-    ana.set_defaults(handler=_cmd_analyze)
-    return parser
+    command.add_argument("--move-to", help="destination folder on another drive (enables MOVE)")
+    command.add_argument("--risk-budget", type=float, default=math.inf, help="max total plan cost")
+    command.add_argument("-c", "--config", type=Path, help="TOML config file")
+    command.add_argument("--top", type=int, default=10, help="rows to show (default: 10)")
+    command.add_argument("-q", "--quiet", action="store_true", help="hide the progress indicator")
+
+
+_PLANNER_CHOICES = {
+    "greedy": lambda args: GreedyPlanner(),
+    "greedy-heuristic": lambda args: GreedyPlanner("heuristic"),
+    "bnb": lambda args: BranchAndBoundPlanner(time_limit_s=args.time_limit),
+}
 
 
 def _size(text: str) -> int:
@@ -98,19 +133,63 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> int:
+    loaded = _load_problem(args)
+    if loaded is None:
+        return 2
+    snapshot, analysis, problem = loaded
+    _print_analysis(snapshot, analysis, problem, args.top)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        analysis.to_frame().to_csv(args.output, index=False)
+        print(f"\nSaved analysis: {args.output}")
+    return 0
+
+
+def _cmd_plan(args: argparse.Namespace) -> int:
+    loaded = _load_problem(args)
+    if loaded is None:
+        return 2
+    snapshot, _, problem = loaded
+    print(f"StorageOps plan for {snapshot.root}")
+    print(
+        f"Must free {format_bytes(problem.required_bytes)} "
+        f"(free {format_bytes(problem.free_bytes)} -> target "
+        f"{format_bytes(problem.target_free_bytes)}); {problem.n:,} candidate files"
+    )
+
+    chosen = _PLANNER_CHOICES[args.planner](args)
+    names = list(_PLANNER_CHOICES) if args.compare else [args.planner]
+    results = {name: _PLANNER_CHOICES[name](args).plan(problem) for name in names}
+    if args.compare:
+        _print_comparison(results)
+    result = results[args.planner]
+    _print_plan(result, snapshot.root, args.top, chosen)
+
+    if args.output and result.plan.actions:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        plan_to_frame(result.plan).to_csv(args.output, index=False)
+        print(f"\nSaved plan: {args.output}")
+    print("\nNothing has been changed. Every action needs your approval before it runs.")
+    return 0
+
+
+def _load_problem(
+    args: argparse.Namespace,
+) -> tuple[EnvironmentSnapshot, StorageAnalysis, CleanupProblem] | None:
+    """Shared by analyze/plan: load or scan the source, analyse it, build the problem."""
     config = _config_or_none(args.config)
     if config is None:
-        return 2
+        return None
     if args.source.is_file():
         try:
             snapshot = EnvironmentSnapshot.load(args.source)
         except (OSError, ValueError, KeyError) as exc:
             print(f"error: cannot load dataset: {exc}", file=sys.stderr)
-            return 2
+            return None
     else:
         snapshot = _scan(args.source, config, quiet=args.quiet, duplicates=True)
         if snapshot is None:
-            return 2
+            return None
 
     free = snapshot.disk.free_bytes
     target = args.target_free if args.target_free is not None else free + args.free
@@ -118,12 +197,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     problem = CleanupProblem.from_analysis(
         analysis, free_bytes=free, target_free_bytes=target, risk_budget=args.risk_budget
     )
-    _print_analysis(snapshot, analysis, problem, args.top)
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        analysis.to_frame().to_csv(args.output, index=False)
-        print(f"\nSaved analysis: {args.output}")
-    return 0
+    return snapshot, analysis, problem
 
 
 def _config_or_none(path: Path | None) -> Config | None:
@@ -267,6 +341,70 @@ def _print_analysis(
         )
         print(f"\nTop {len(view)} candidates by heuristic:")
         print(view.to_string(index=False))
+
+
+def _print_comparison(results: dict[str, PlannerResult]) -> None:
+    rows = []
+    for name, r in results.items():
+        rows.append(
+            {
+                "planner": name,
+                "status": r.status,
+                "frees": format_bytes(r.plan.freed_bytes),
+                "cost": f"{r.plan.total_cost:.3f}",
+                "actions": len(r.plan.actions),
+                "time": f"{r.stats.elapsed_s:.2f}s",
+                "generated": r.stats.nodes_generated,
+                "expanded": r.stats.nodes_expanded,
+                "pruned": r.stats.nodes_pruned,
+                "gap": "-" if math.isnan(r.gap) else f"{r.gap:.2%}",
+            }
+        )
+    print("\nPlanner comparison:")
+    print(pd.DataFrame(rows).to_string(index=False))
+
+
+def _print_plan(result: PlannerResult, root: str, top: int, planner: Planner) -> None:
+    plan, stats = result.plan, result.stats
+    print(f"\nPlan from {planner.name}: {result.status}")
+    if result.status == "infeasible":
+        print("  The target cannot be reached with the allowed, safe actions.")
+        return
+    if not plan.actions:
+        print("  No action needed: the target is already met.")
+        return
+    gap = "" if math.isnan(result.gap) else f", optimality gap {result.gap:.2%}"
+    print(
+        f"  frees {format_bytes(plan.freed_bytes)} with {len(plan.actions):,} actions, "
+        f"total cost {plan.total_cost:.3f}{gap}"
+    )
+    print(
+        f"  search: {stats.nodes_generated:,} generated, {stats.nodes_expanded:,} expanded, "
+        f"{stats.nodes_pruned:,} pruned in {stats.elapsed_s:.2f}s"
+        + (" (limit reached)" if stats.limit_reached else "")
+    )
+    if not plan.meets_target:
+        short = plan.required_bytes - plan.freed_bytes
+        print(f"  WARNING: {format_bytes(short)} short of the target")
+
+    frame = plan_to_frame(plan)
+    by_action = frame.groupby("action").agg(files=("path", "size"), frees=("benefit_bytes", "sum"))
+    for action, row in by_action.iterrows():
+        print(f"  {action:<9} {row['files']:>6,} files  {format_bytes(row['frees']):>10}")
+
+    shown = frame.nlargest(top, "benefit_bytes")
+    view = pd.DataFrame(
+        {
+            "path": shown["path"].map(lambda p: _relative(p, root)),
+            "action": shown["action"],
+            "size": shown["size_bytes"].map(format_bytes),
+            "frees": shown["benefit_bytes"].map(format_bytes),
+            "risk": shown["risk"].map("{:.2f}".format),
+            "cost": shown["cost"].map("{:.3f}".format),
+        }
+    )
+    print(f"\nLargest {len(view)} of {len(frame):,} proposed actions:")
+    print(view.to_string(index=False))
 
 
 def _relative(path: str, root: str) -> str:

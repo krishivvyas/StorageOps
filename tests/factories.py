@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import ntpath
 
+import numpy as np
 import pandas as pd
 
+from storageops.core.state import CleanupProblem
 from storageops.models import FileCategory, FileRecord
 from storageops.sensors.dataset import records_to_frame
 from tests.conftest import DAY, NOW
@@ -49,3 +52,53 @@ def make_record(
 
 def make_frame(*records: FileRecord) -> pd.DataFrame:
     return records_to_frame(records)
+
+
+def make_problem(benefit, cost, groups=None, group_sizes=(), *, free=0, target=0, budget=None,
+                 heuristic=None):  # fmt: skip
+    """A CleanupProblem from literal matrices (columns: KEEP, DELETE, ARCHIVE, COMPRESS, MOVE)."""
+    benefit = np.array(benefit, dtype=np.int64)
+    cost = np.array(cost, dtype=float)
+    n = len(benefit)
+    if heuristic is None:
+        heuristic = np.zeros_like(cost)
+    heuristic = np.where(np.isfinite(cost), np.asarray(heuristic, dtype=float), -math.inf)
+    return CleanupProblem(
+        paths=tuple(f"f{i}" for i in range(n)),
+        sizes=benefit.max(axis=1) if n else np.zeros(0, dtype=np.int64),
+        risk=np.zeros(n),
+        benefit=benefit.reshape(n, 5),
+        cost=cost.reshape(n, 5),
+        heuristic=heuristic.reshape(n, 5),
+        group_index=np.array(groups if groups is not None else [-1] * n, dtype=np.int64),
+        group_sizes=tuple(group_sizes),
+        free_bytes=free,
+        target_free_bytes=target,
+        risk_budget=math.inf if budget is None else budget,
+    )
+
+
+def random_problem(rng: np.random.Generator, n: int, *, budget: float | None = None,
+                   target_fraction: float = 0.4) -> CleanupProblem:  # fmt: skip
+    """Random instance shaped like real ones: DELETE frees everything, ARCHIVE/COMPRESS a
+    fraction, MOVE sometimes; some actions disallowed; a few duplicate pairs."""
+    size = rng.integers(1, 1000, n)
+    risk = rng.random(n)
+    benefit = np.zeros((n, 5), dtype=np.int64)
+    cost = np.full((n, 5), math.inf)
+    cost[:, 0] = 0.0
+    ratio = rng.uniform(0.2, 1.0, n)
+    benefit[:, 1], cost[:, 1] = size, risk + 0.02
+    benefit[:, 2], cost[:, 2] = (size * (1 - ratio)).astype(np.int64), 0.4 * risk + 0.04
+    benefit[:, 3], cost[:, 3] = (size * (1 - ratio) * 0.6).astype(np.int64), 0.1 * risk + 0.03
+    benefit[:, 4], cost[:, 4] = size, 0.25 * risk + 0.03
+    disallow = rng.random((n, 5)) < 0.35
+    disallow[:, 0] = False
+    cost[disallow] = math.inf
+    groups = np.full(n, -1)
+    pairs = n // 4
+    for g in range(pairs):
+        groups[2 * g : 2 * g + 2] = g
+    target = int(size.sum() * target_fraction)
+    return make_problem(benefit, cost, groups, [2] * pairs, target=target, budget=budget,
+                        heuristic=rng.random((n, 5)))  # fmt: skip

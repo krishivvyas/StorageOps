@@ -107,10 +107,50 @@ subject to  sum_i b(f_i, a_i) >= R
 ```
 
 This is a minimisation form of the **multiple-choice knapsack problem** with side
-constraints, which is NP-hard. That motivates comparing:
+constraints, which is NP-hard. That motivates comparing a fast heuristic method with an
+exact search.
 
-- **Greedy baseline (Phase 3):** take (file, action) pairs in heuristic or benefit/cost order until B >= R. Fast, not optimal.
-- **Branch-and-bound (Phase 3):** depth-first search over the state space above, pruned with an admissible lower bound from the fractional (LP) relaxation of the remaining files. Optimal, exponential in the worst case.
+## Planners (`planners/`)
+
+All planners take a `CleanupProblem` and return a `PlannerResult`: the plan, its status
+(`optimal` / `feasible` / `infeasible` / `no plan found`), search statistics, and a lower
+bound for reporting the optimality gap.
+
+### Greedy baseline (`greedy.py`)
+
+- **`ratio` key (default): the multiple-choice knapsack greedy.** Each file's allowed
+  (benefit, cost) points form a lower convex hull through (0, 0), e.g. KEEP -> COMPRESS ->
+  DELETE. Each hull edge is an "upgrade" with an incremental cost per byte. All edges of
+  all files are taken in increasing slope order until B >= R. A file can therefore be
+  compressed first and upgraded to DELETE later if that is the next cheapest byte.
+- **`heuristic` key:** (file, action) pairs in decreasing h order, with upgrades allowed.
+  It isolates the effect of the heuristic weights.
+- **Both:** skip choices that break a constraint, then drop redundant actions (costliest
+  first) while the target stays met. O(m log m). Typical failure: the cheapest bytes may
+  sit in a file far larger than needed, so the plan overshoots at a high absolute cost.
+
+### Branch-and-bound (`branch_and_bound.py`)
+
+Depth-first search over the state space with backtracking on mutable arrays (O(n) memory).
+
+| Ingredient | Choice |
+|---|---|
+| Initial incumbent U | Best of the two greedy plans |
+| Lower bound | g + LP(remaining files, remaining bytes): the LP relaxation of the multiple-choice knapsack (`relaxation.py`), i.e. hull edges of the remaining files filled in slope order, the last one fractionally. Admissible because the relaxation drops integrality, the duplicate constraint and the budget. |
+| Pruning | Child pruned if g >= U, g > C_max, g + LP >= U, or it deletes a group's last copy |
+| Goal cut-off | A node with B >= R is recorded and not expanded (keeping everything else is its cheapest completion) |
+| File order | `ratio` (cheapest bytes first, default), `benefit`, or `problem` |
+| Action order | `bound` (lowest g + LP first, default) or `heuristic` (highest h first) |
+| Limits | Time / node limit, returning the best plan so far with gap = (cost - root LP) / cost |
+
+If the search finishes, the plan is proven optimal; if the root LP is infeasible, the
+target is proven unreachable.
+
+### Exhaustive reference (`exhaustive.py`)
+
+Plain DFS through `CleanupProblem.successors`, no bounding (n <= 16). It is used as
+ground truth: the tests check that branch-and-bound matches it on 60 random instances
+with every ordering option, and that the LP bound never exceeds the true optimum.
 
 ## Safety boundary
 
