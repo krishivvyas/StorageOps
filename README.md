@@ -1,7 +1,7 @@
 # StorageOps
 
 AI-Based Intelligent Storage Space Optimization and Safe Cleanup Planner.
-ECSCT24301 Foundation of AI, PBL (Div C): Het Patel, Krishiv Vyas, Parth Patel.
+ECSCT24301 Foundation of AI, PBL (Div B): Het Patel, Krishiv Vyas, Parth Patel.
 
 StorageOps treats storage cleanup as an AI planning and optimization problem rather than a
 fixed rule list. It scans a storage environment, models every eligible file's possible
