@@ -536,3 +536,8 @@ def _relative(path: str, root: str) -> str:
         return str(Path(path).relative_to(root))
     except ValueError:
         return path
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
